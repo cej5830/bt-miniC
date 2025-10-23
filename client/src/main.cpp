@@ -5,6 +5,7 @@
 #include <boost/url.hpp>
 #include <iostream>
 #include <string>
+#include <bencoding.hpp>
 
 using tcp = boost::asio::ip::tcp;
 namespace http = boost::beast::http;
