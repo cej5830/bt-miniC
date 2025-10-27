@@ -1,4 +1,3 @@
-#pragma once
 #ifndef INC_BENCODE_HPP
 #define INC_BENCODE_HPP
 
@@ -774,6 +773,65 @@ namespace bencode {
         encode_to(std::ostreambuf_iterator(os), std::forward<T>(t)...);
     }
 
+}
+
+std::string toHex(const unsigned char* hash, size_t len) {
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; i++) {
+        out.push_back(hex[(hash[i] >> 4) & 0xF]);
+        out.push_back(hex[hash[i] & 0xF]);
+    }
+    return out;
+}
+
+std::pair<size_t, size_t> extract_info_range(std::span<const unsigned char> data) {
+    constexpr std::string_view key = "4:info";
+    auto it = std::search(data.begin(), data.end(), key.begin(), key.end());
+    if (it == data.end()) throw std::runtime_error("'4:info' key not found");
+
+    size_t start = std::distance(data.begin(), it) + key.size();
+    if (start >= data.size() || data[start] != 'd')
+        throw std::runtime_error("Expected 'd' after '4:info'");
+
+    // Depth-based parser: counts nested dictionaries/lists
+    size_t pos = start;
+    int depth = 0;
+    while (pos < data.size()) {
+        unsigned char c = data[pos];
+        if (c == 'd' || c == 'l') {
+            ++depth;
+            ++pos;
+        }
+        else if (c == 'e') {
+            --depth;
+            ++pos;
+            if (depth == 0) break; // reached end of top-level info dict
+        }
+        else if (std::isdigit(c)) {
+            // parse string: <length>:<data>
+            size_t len_start = pos;
+            while (pos < data.size() && std::isdigit(data[pos])) ++pos;
+            if (pos == data.size() || data[pos] != ':') throw std::runtime_error("Malformed string");
+            size_t len = std::stoull(std::string(reinterpret_cast<const char*>(&data[len_start]), pos - len_start));
+            ++pos; // skip ':'
+            pos += len; // skip string content
+        }
+        else if (c == 'i') {
+            // integer: i<num>e
+            ++pos; // skip 'i'
+            while (pos < data.size() && data[pos] != 'e') ++pos;
+            if (pos == data.size()) throw std::runtime_error("Unterminated integer");
+            ++pos; // skip 'e'
+        }
+        else {
+            throw std::runtime_error("Unexpected character in bencode");
+        }
+    }
+
+    if (depth != 0) throw std::runtime_error("Unbalanced dictionary in 'info'");
+    return { start, pos };
 }
 
 #endif
